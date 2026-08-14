@@ -18,6 +18,7 @@ import RiskRegisterTable from "./RiskRegisterTable";
 import IcaoMatrixPanel from "./IcaoMatrixPanel";
 import ComparisonViews from "./ComparisonViews";
 import DistressCoveragePanel from "./DistressCoveragePanel";
+import RiskMethodologyPanel from "./RiskMethodologyPanel";
 
 interface RiskTabProps {
   sections: SectionData[];
@@ -311,6 +312,8 @@ export default function RiskTab({
         totalBranches={results.length}
         sampleUnitBranchCount={Object.keys(unitsBySection).length}
       />
+
+      <RiskMethodologyPanel />
 
       <RiskRegisterTable
         results={results}

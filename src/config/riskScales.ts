@@ -20,6 +20,13 @@
  *      of Singapore. (Failure-mode framing for hazard classes; the argument
  *      that distress SEVERITY, not mere presence, sets the effect on aircraft
  *      operations.)
+ *  [6] Alberti, S. & Fiori, F. (2019). Integrating Risk Assessment into
+ *      Pavement Management Systems. J. Infrastructure Systems 25(1),
+ *      05019001. (Road PMS, not airport - cited for two comparisons only,
+ *      neither of which changes a value in this file: Table 8's PCI-banded
+ *      consequence levels versus this file's PCI-banded likelihood, and
+ *      Table 12's PCI-triggered treatment ladder versus rehab.ts's
+ *      REHAB_METHODOLOGY. See the Risk tab's methodology panel.)
  *
  * DEVIATION FROM [2] (state this in your methodology chapter):
  *   Seven & Yardim obtain Likelihood from a survey of six Istanbul Airport
@@ -257,11 +264,33 @@ export const ROLE_LABELS: Record<BranchRole, string> = {
  *
  * Hazard class groups ASTM D5340 distresses by the accident they can cause,
  * because consequence depends on the failure mode and not on the distress name.
+ * This grouping - by airport safety pathway rather than by pavement-engineering
+ * distress family - follows Pasindu [5]'s framework for runway pavement risk:
+ * §3.1 identifies the mechanisms below as the ones that actually reach aircraft
+ * operations, and §6.3 develops the case for rutting/depression-type distortion
+ * specifically (see the friction group note).
  *
- *   fod        - loose material entering an engine or striking an airframe
- *   friction   - loss of braking or directional control, excursion risk
- *   structural - load-carrying failure under an aircraft
- *   other      - appearance and durability, no direct safety pathway
+ *   fod        - loose material entering an engine or striking an airframe.
+ *                Surface-layer loss and cavities: raveling, weathering,
+ *                patching, spalling, jet blast erosion, joint seal damage,
+ *                pothole, asphalt stripping.
+ *   friction   - loss of braking or directional control, excursion risk.
+ *                Pasindu §3.1/§6.3: rutting, depression and other surface
+ *                distortion pond water on the pavement, which is what drives
+ *                hydroplaning and increased braking distance - the mechanism
+ *                his finite-element model (§3.2) quantifies for rut depth
+ *                specifically. Bleeding and corrugation/shoving/swell sit in
+ *                the same class on the same mechanism: a smoothed or deformed
+ *                surface loses the microtexture that skid resistance depends
+ *                on. APMS has no rut depth, texture depth or cross-slope data,
+ *                so only the classification transfers, not Pasindu's computed
+ *                hydroplaning speeds or braking distances - see the
+ *                methodology panel in RiskTab for that limit stated in full.
+ *   structural - load-carrying failure under an aircraft. Cracking that
+ *                indicates the layer beneath is failing, not just the surface:
+ *                alligator, longitudinal & transverse, block, slippage, joint
+ *                reflection, corner cracking.
+ *   other      - appearance and durability, no direct safety pathway.
  *
  * Align these values with the airport's own SMS severity table before the
  * defence [3]. A consequence scale borrowed from the operator's live SMS is far
@@ -290,13 +319,27 @@ export const DISTRESS_TO_HAZARD_CLASS: Record<string, HazardClass> = {
   POTHOLE: 'fod',
   // Surface layer loss, so debris. 18 records.
   'ASPHALT STRIPPING': 'fod',
+  // Pasindu [5] §3.1/§6.3: these pond water on the pavement surface, and
+  // ponded water is what drives hydroplaning and increased braking distance.
+  // Rutting is the distress his finite-element model computes hydroplaning
+  // speed and braking distance for directly (§6.3.1-6.3.4); depression is the
+  // same mechanism on a broader footprint; corrugation/shoving/swell are
+  // longitudinal-profile distortion with the same drainage consequence.
   POLISHED_AGGREGATE: 'friction',
-  BLEEDING: 'friction',
   RUTTING: 'friction',
   DEPRESSION: 'friction',
   CORRUGATION: 'friction',
   SHOVING: 'friction',
   SWELL: 'friction',
+  // Bleeding smooths the surface rather than deforming it, but the safety
+  // pathway is the same one Pasindu's framework targets - lost microtexture,
+  // lost skid resistance under wet conditions.
+  BLEEDING: 'friction',
+  // Cracking that indicates the layer BENEATH the surface is failing, not
+  // just the surface itself - a load-carrying rather than a drainage or
+  // debris pathway. The distinction from the fod/friction groups above is
+  // exactly Pasindu [5]'s point in §3.1: consequence follows failure mode,
+  // not distress family.
   'ALLIGATOR CR': 'structural',
   'L & T CR': 'structural',
   'BLOCK CR': 'structural',
