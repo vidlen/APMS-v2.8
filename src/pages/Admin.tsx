@@ -9,6 +9,7 @@ import SectionEditorTable from "@/components/admin/SectionEditorTable";
 import SampleUnitTable from "@/components/admin/SampleUnitTable";
 import ImportExportPanel from "@/components/admin/ImportExportPanel";
 import RiskInventoryTable from "@/components/admin/RiskInventoryTable";
+import RepairLogPanel from "@/components/admin/RepairLogPanel";
 import RehabInventoryTable from "@/components/admin/RehabInventoryTable";
 
 type AdminTab = "pci" | "rehab" | "risk";
@@ -131,14 +132,18 @@ export default function Admin() {
           )}
 
           {activeTab === "risk" && (
-            <div className="panel-surface rounded-lg overflow-hidden">
-              <div className="px-4 py-3 border-b border-border">
-                <h2 className="text-sm font-bold text-foreground">
-                  Risk Inventory — {selectedYear}
-                </h2>
+            <>
+              <div className="panel-surface rounded-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-border">
+                  <h2 className="text-sm font-bold text-foreground">
+                    Risk Inventory — {selectedYear}
+                  </h2>
+                </div>
+                <RiskInventoryTable year={selectedYear} />
               </div>
-              <RiskInventoryTable year={selectedYear} />
-            </div>
+
+              <RepairLogPanel year={selectedYear} />
+            </>
           )}
         </div>
       </div>

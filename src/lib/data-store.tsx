@@ -230,6 +230,9 @@ interface DataContextValue {
   /** Replaces the seeded repair log wholesale (Admin -> Repair Log). Not
    *  year-scoped - see the field comment on DataOverrides.repairLog. */
   importRepairLogJSON: (records: RepairLogRecord[]) => void;
+  /** Clears an admin-imported log, reverting to the seed. Narrower than
+   *  resetDrafts, which discards every override across every year. */
+  resetRepairLogToSeed: () => void;
   resetDrafts: () => void;
 }
 
@@ -392,6 +395,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setOverrides((prev) => ({ ...prev, repairLog: records }));
   }, []);
 
+  const resetRepairLogToSeed = useCallback(() => {
+    setOverrides((prev) => {
+      const next = { ...prev };
+      delete next.repairLog;
+      return next;
+    });
+  }, []);
+
   const resetDrafts = useCallback(() => {
     clearOverridesStorage();
     setOverrides(emptyOverrides());
@@ -411,6 +422,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       importSectionsGeoJSON,
       importUnitsGeoJSON,
       importRepairLogJSON,
+      resetRepairLogToSeed,
       resetDrafts,
     }),
     [
@@ -426,6 +438,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       importSectionsGeoJSON,
       importUnitsGeoJSON,
       importRepairLogJSON,
+      resetRepairLogToSeed,
       resetDrafts,
     ]
   );
