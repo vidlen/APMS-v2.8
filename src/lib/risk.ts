@@ -36,6 +36,7 @@
 import {
   CONSEQUENCE_MATRIX,
   DETECTABILITY_ESCALATION,
+  DISTRESS_ALIASES,
   DISTRESS_TO_HAZARD_CLASS,
   HAZARD_CLASS_DETECTABILITY,
   INSPECTION_RECENCY_ESCALATION,
@@ -45,6 +46,7 @@ import {
   RISK_BANDS,
   ROLE_TO_FREQUENCY,
   type Detectability,
+  type DistressSource,
   type HazardClass,
   type RiskBand,
   type BranchRole,
@@ -69,10 +71,23 @@ export interface BranchRiskInput {
   lastInspectionYear: number;
 
   /**
-   * Dominant recorded distress, using the PAVER description string
-   * (for example 'RAVELING', 'ALLIGATOR CR'). Drives the hazard class.
+   * Dominant recorded distress. Either a canonical PAVER/ASTM key (for
+   * example 'RAVELING', 'ALLIGATOR CR') or one of the repair log's bilingual
+   * source strings - hazardClassFor consults DISTRESS_ALIASES first, so
+   * either form resolves. Drives the hazard class.
    */
   dominantDistress?: string;
+
+  /**
+   * Where dominantDistress came from (section 8, riskScales.ts): an admin
+   * override, the PCI sample units, the repair log, the reviewed two-row
+   * table, or none. Purely informational - it does not affect the score,
+   * only the trace and the register's provenance marker. Callers that don't
+   * track provenance (the worked examples, most existing callers) can leave
+   * it unset; it is not treated as 'none' for scoring purposes because
+   * nothing here reads it except to report it.
+   */
+  distressSource?: DistressSource;
 
   /**
    * Explicit detectability override (locked decision 6). When set, this ALSO
@@ -115,6 +130,19 @@ export interface BranchRiskResult {
   /** Convenience alias for icao.zoneAction, so a caller need not reach into `icao`. */
   recommendedAction: string;
   hazardClass: HazardClass;
+  /** The distress that produced hazardClass, canonicalised. Undefined when no
+   *  distress was supplied. */
+  dominantDistress?: string;
+  /**
+   * Where dominantDistress came from - a straight pass-through of
+   * BranchRiskInput.distressSource, never inferred here. risk-adapter.ts is
+   * the only caller that knows the precedence chain, so it is the only place
+   * that should claim 'none' (no evidence from any source). A caller that
+   * supplies dominantDistress directly without a source - WORKED_EXAMPLES
+   * below, most of risk.test.ts - leaves this undefined rather than have
+   * scoreBranch guess 'none' and contradict its own hazardClass.
+   */
+  distressSource?: DistressSource;
   /** Displayed label - always populated (inferred from hazardClass, or the explicit override). */
   detectability: Detectability;
   /** True only when `detectability` came from an explicit override on the input. */
@@ -164,10 +192,26 @@ export function recencySteps(yearsSinceInspection: number): number {
   return 0;
 }
 
+/** Trace-only label for distressSource, section 8 riskScales.ts. 'none' never
+ *  reaches this - the trace omits the parenthetical entirely when unset. */
+const DISTRESS_SOURCE_LABELS: Record<Exclude<DistressSource, 'none'>, string> = {
+  admin: 'admin override',
+  units: 'PCI sample units',
+  log: 'repair log',
+  inventory: 'reviewed inventory',
+};
+
+/** Trim + uppercase, then DISTRESS_ALIASES, matching canonicalDistress in
+ *  dominant-distress.ts. Duplicated rather than imported so risk.ts keeps its
+ *  narrow riskScales.ts-only dependency surface - both read the same table. */
+function canonicalise(distress: string): string {
+  const key = distress.trim().toUpperCase();
+  return DISTRESS_ALIASES[key] ?? key;
+}
+
 export function hazardClassFor(distress?: string): HazardClass {
   if (!distress) return 'other';
-  const key = distress.trim().toUpperCase();
-  return DISTRESS_TO_HAZARD_CLASS[key] ?? 'other';
+  return DISTRESS_TO_HAZARD_CLASS[canonicalise(distress)] ?? 'other';
 }
 
 /** The displayed detectability label: an explicit override, or the hazard-class default. */
@@ -254,9 +298,13 @@ export function scoreBranch(
 
   // ---- Consequence --------------------------------------------------------
   let consequence = CONSEQUENCE_MATRIX[input.role][hazardClass];
+  const distressLabel = input.dominantDistress ? canonicalise(input.dominantDistress) : undefined;
+  const sourceLabel = input.distressSource && input.distressSource !== 'none'
+    ? DISTRESS_SOURCE_LABELS[input.distressSource]
+    : undefined;
   trace.push(
     `C ${consequence} from role '${input.role}' x hazard class '${hazardClass}'` +
-      (input.dominantDistress ? ` (${input.dominantDistress.trim()})` : ''),
+      (distressLabel ? ` (${distressLabel}${sourceLabel ? `, ${sourceLabel}` : ''})` : ''),
   );
 
   // ---- Expert overrides ---------------------------------------------------
@@ -309,6 +357,8 @@ export function scoreBranch(
     icao,
     recommendedAction: icao.zoneAction,
     hazardClass,
+    dominantDistress: distressLabel,
+    distressSource: input.distressSource,
     detectability,
     detectabilityApplied,
     likelihoodTier: tier,
