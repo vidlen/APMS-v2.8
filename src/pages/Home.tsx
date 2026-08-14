@@ -17,7 +17,8 @@ import { usePavementData } from "@/hooks/usePavementData";
 import { usePciScalePanel } from "@/hooks/usePciScalePanel";
 import { countByCondition, pciCategories, parsePCIValue, type SectionData } from "@/lib/pci-utils";
 import type { SurveyYear } from "@/lib/survey-years";
-import { useData } from "@/lib/data-store";
+import { useData, useRepairLog } from "@/lib/data-store";
+import { aggregateRepairLog } from "@/lib/repair-log";
 
 // Raised from 640 after measuring the actual content: the workspace tab
 // bar's full labels alone need ~742px of scrollWidth (774px of viewport
@@ -68,8 +69,19 @@ export default function Home() {
   const skipSplash = (location.state as { fromAdmin?: boolean } | null)?.fromAdmin === true;
 
   const [selectedYear, setSelectedYear] = useState<SurveyYear>("2025");
-  const { sections, loading, error } = usePavementData(selectedYear);
+  const { sections, unitsBySection, loading, error } = usePavementData(selectedYear);
   const { years } = useData();
+  const { records: repairLogRecords } = useRepairLog();
+  // Aggregated against THIS year's branch set, not a fixed one - resolveBranch
+  // only accepts a location match that exists in the currently loaded network
+  // (repair-log.ts), so the aggregate has to be recomputed if the network ever
+  // changes shape. sections is already stable across renders that don't
+  // actually change the data (usePavementData memoizes it), so this only
+  // recomputes when the year or the log itself changes.
+  const repairLogAggregate = useMemo(() => {
+    const knownBranches = new Set(sections.map((s) => s.Section));
+    return aggregateRepairLog(repairLogRecords, knownBranches);
+  }, [sections, repairLogRecords]);
   const [isNarrow, setIsNarrow] = useState(isNarrowViewport);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [selectedSection, setSelectedSection] = useState<SectionData | null>(null);
@@ -488,7 +500,12 @@ export default function Home() {
         </div>
       ) : activeTab === "risk" && showPciData ? (
         <div className="relative flex-1 min-h-0 overflow-y-auto bg-background">
-          <RiskTab sections={sections} selectedYear={selectedYear} />
+          <RiskTab
+            sections={sections}
+            selectedYear={selectedYear}
+            unitsBySection={unitsBySection}
+            repairLogByBranch={repairLogAggregate.byBranch}
+          />
         </div>
       ) : activeTab === "rehab" && showPciData ? (
         <RehabTab sections={sections} selectedYear={selectedYear} />

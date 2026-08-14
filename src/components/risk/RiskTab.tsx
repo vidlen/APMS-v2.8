@@ -4,6 +4,9 @@ import { pciCategories } from "@/lib/pci-utils";
 import type { SurveyYear } from "@/lib/survey-years";
 import { useData } from "@/lib/data-store";
 import type { SectionRiskMetaOverride } from "@/lib/data-overrides";
+import type { GeoJSONFeatureCollection } from "@/lib/geojson-types";
+import type { DistressTally } from "@/lib/dominant-distress";
+import type { MarkovForecastEntry } from "@/lib/markov-forecast";
 import { toBranchRiskInputs } from "@/lib/risk-adapter";
 import { scoreNetwork, riskProfile, type BranchRiskResult } from "@/lib/risk";
 import { ICAO_ZONES, ICAO_GRID_PROVENANCE, type IcaoZoneName } from "@/config/icaoMatrix";
@@ -17,14 +20,27 @@ import ComparisonViews from "./ComparisonViews";
 interface RiskTabProps {
   sections: SectionData[];
   selectedYear: SurveyYear;
+  /** PCI sample units already loaded for this year (usePavementData), keyed
+   *  by Section - the 'units' tier of the dominant-distress precedence chain
+   *  (risk-adapter.ts). Optional so a caller that hasn't wired evidence
+   *  sources yet (tests, a future embed) still gets a working tab. */
+  unitsBySection?: Record<string, GeoJSONFeatureCollection>;
+  /** The repair log, already aggregated against this year's branch set
+   *  (Home.tsx: aggregateRepairLog(...).byBranch) - the 'log' tier. */
+  repairLogByBranch?: Record<string, DistressTally[]>;
 }
 
 const ZONE_ORDER: IcaoZoneName[] = ["Intolerable", "Tolerable", "Acceptable"];
 
-// Stable reference for years with no admin-entered risk overrides, so
-// `?? EMPTY_META` doesn't hand toBranchRiskInputs a fresh object identity on
-// every render and force it to recompute all 75 scores needlessly.
+// Stable references so a caller that omits an optional prop - or the demo
+// per-branch call sites (RiskInventoryTable.tsx) that only ever set
+// riskMetaOverrides - don't hand toBranchRiskInputs a fresh object identity
+// every render and force it to recompute every score needlessly. Same reasoning
+// for all three: EMPTY_META predates this phase, EMPTY_UNITS/EMPTY_LOG are new.
 const EMPTY_META: Record<string, SectionRiskMetaOverride> = {};
+const EMPTY_MARKOV: Record<string, MarkovForecastEntry> = {};
+const EMPTY_UNITS: Record<string, GeoJSONFeatureCollection> = {};
+const EMPTY_LOG: Record<string, DistressTally[]> = {};
 
 // MapView is shared with the PCI tab (backlog F: "reuse the existing GeoJSON
 // component"), whose props include a PCI-band legend filter and a
@@ -74,7 +90,12 @@ function RiskMapLegend({ colorMode }: { colorMode: MapColorMode }) {
   );
 }
 
-export default function RiskTab({ sections, selectedYear }: RiskTabProps) {
+export default function RiskTab({
+  sections,
+  selectedYear,
+  unitsBySection = EMPTY_UNITS,
+  repairLogByBranch = EMPTY_LOG,
+}: RiskTabProps) {
   const { overrides } = useData();
   const riskMetaOverrides = overrides.sectionRiskMeta[selectedYear] ?? EMPTY_META;
 
@@ -86,10 +107,20 @@ export default function RiskTab({ sections, selectedYear }: RiskTabProps) {
   // Same 75 branches the PCI tab already shows, scored through the
   // Fine-Kinney engine + ICAO crosswalk (src/lib/risk.ts, src/lib/icao.ts),
   // with any admin-entered Risk Inventory overrides (Admin tab) preferred
-  // over the heuristic defaults in risk-adapter.ts.
+  // over the heuristic defaults in risk-adapter.ts. dominantDistress now
+  // resolves through the full precedence chain (admin > units > log >
+  // inventory > none) - see the file header in risk-adapter.ts.
   const inputs = useMemo(
-    () => toBranchRiskInputs(sections, selectedYear, riskMetaOverrides),
-    [sections, selectedYear, riskMetaOverrides],
+    () =>
+      toBranchRiskInputs(
+        sections,
+        selectedYear,
+        riskMetaOverrides,
+        EMPTY_MARKOV,
+        unitsBySection,
+        repairLogByBranch,
+      ),
+    [sections, selectedYear, riskMetaOverrides, unitsBySection, repairLogByBranch],
   );
   const results = useMemo(() => scoreNetwork(inputs), [inputs]);
   const roleByBranch = useMemo(() => {

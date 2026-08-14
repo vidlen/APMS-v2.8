@@ -26,6 +26,9 @@ import {
   type SectionInventoryOverride,
   type SectionRehabOverride,
 } from "@/lib/data-overrides";
+import { validateRepairLog, type RepairLogRecord } from "@/lib/repair-log";
+
+const SEED_REPAIR_LOG_URL = "/data/repair-log-2025.json";
 
 export interface LiveYearMeta extends YearMeta {
   hasData: boolean;
@@ -49,6 +52,31 @@ function fetchJsonCached(url: string): Promise<GeoJSONFeatureCollection> {
     baseFetchCache.set(url, pending);
   }
   return pending;
+}
+
+// Same fetch-once-cache-forever shape as fetchJsonCached above, but for the
+// repair log: a flat RepairLogRecord[] rather than a GeoJSONFeatureCollection,
+// and validated on the way in (validateRepairLog) since a malformed seed file
+// should fail loudly rather than silently produce an empty register column.
+let repairLogSeedFetch: Promise<RepairLogRecord[]> | null = null;
+
+function fetchSeedRepairLog(): Promise<RepairLogRecord[]> {
+  if (!repairLogSeedFetch) {
+    repairLogSeedFetch = fetch(SEED_REPAIR_LOG_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load ${SEED_REPAIR_LOG_URL}`);
+        return res.json();
+      })
+      .then((json) => {
+        const result = validateRepairLog(json);
+        if (!result.ok) throw new Error(`Seeded repair log failed validation: ${result.error}`);
+        return result.data;
+      });
+    repairLogSeedFetch.catch(() => {
+      repairLogSeedFetch = null;
+    });
+  }
+  return repairLogSeedFetch;
 }
 
 function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -199,6 +227,9 @@ interface DataContextValue {
   removeYear: (id: string) => void;
   importSectionsGeoJSON: (year: string, fc: GeoJSONFeatureCollection) => void;
   importUnitsGeoJSON: (year: string, section: string, fc: GeoJSONFeatureCollection) => void;
+  /** Replaces the seeded repair log wholesale (Admin -> Repair Log). Not
+   *  year-scoped - see the field comment on DataOverrides.repairLog. */
+  importRepairLogJSON: (records: RepairLogRecord[]) => void;
   resetDrafts: () => void;
 }
 
@@ -357,6 +388,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const importRepairLogJSON = useCallback((records: RepairLogRecord[]) => {
+    setOverrides((prev) => ({ ...prev, repairLog: records }));
+  }, []);
+
   const resetDrafts = useCallback(() => {
     clearOverridesStorage();
     setOverrides(emptyOverrides());
@@ -375,6 +410,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       removeYear,
       importSectionsGeoJSON,
       importUnitsGeoJSON,
+      importRepairLogJSON,
       resetDrafts,
     }),
     [
@@ -389,6 +425,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       removeYear,
       importSectionsGeoJSON,
       importUnitsGeoJSON,
+      importRepairLogJSON,
       resetDrafts,
     ]
   );
@@ -408,6 +445,68 @@ export function useSectionsWithUnits(year: string): string[] {
     () => getSectionsWithUnitsForYear(year, years, overrides),
     [year, years, overrides]
   );
+}
+
+interface RepairLogState {
+  records: RepairLogRecord[];
+  loading: boolean;
+  error: string | null;
+}
+
+const EMPTY_REPAIR_LOG: RepairLogRecord[] = [];
+
+/**
+ * The repair log's validated records: the admin's imported log if one has
+ * been set, otherwise the seeded public/data/repair-log-2025.json. Not
+ * year-scoped (see the field comment on DataOverrides.repairLog) - callers
+ * that need it aggregated against a specific year's branch set do that
+ * themselves (aggregateRepairLog in repair-log.ts), since only the caller
+ * knows which Section codes that year actually has.
+ */
+export function useRepairLog(): RepairLogState {
+  const { overrides } = useData();
+  const [seed, setSeed] = useState<RepairLogState>({
+    records: EMPTY_REPAIR_LOG,
+    loading: overrides.repairLog === undefined,
+    error: null,
+  });
+
+  useEffect(() => {
+    if (overrides.repairLog !== undefined) return; // admin import wins, no fetch needed
+    let cancelled = false;
+
+    // No synchronous "loading = true" flip here: fetchSeedRepairLog is
+    // fetched once and cached at module scope (like fetchJsonCached above),
+    // so this effect only does real async work on the very first mount -
+    // the initial useState value above already covers that case. A later
+    // re-run (overrides.repairLog toggling back to undefined, e.g. via
+    // resetDrafts) resolves the same cached promise, in practice
+    // instantly, so skipping the loading flicker for that rare path costs
+    // nothing a user would notice.
+    (async () => {
+      try {
+        const records = await fetchSeedRepairLog();
+        if (!cancelled) setSeed({ records, loading: false, error: null });
+      } catch (err) {
+        if (!cancelled) {
+          setSeed({
+            records: EMPTY_REPAIR_LOG,
+            loading: false,
+            error: err instanceof Error ? err.message : "Failed to load the repair log",
+          });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [overrides.repairLog]);
+
+  if (overrides.repairLog !== undefined) {
+    return { records: overrides.repairLog, loading: false, error: null };
+  }
+  return seed;
 }
 
 interface RawYearData {

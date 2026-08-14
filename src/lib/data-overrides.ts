@@ -2,6 +2,7 @@ import type { GeoJSONFeatureCollection } from "@/lib/geojson-types";
 import type { BranchRole, Detectability } from "@/config/riskScales";
 import type { SectionData } from "@/lib/pci-utils";
 import type { RehabTreatment, RehabYear } from "@/lib/rehab";
+import type { RepairLogRecord } from "@/lib/repair-log";
 
 export interface AddedYearMeta {
   id: string;
@@ -70,6 +71,14 @@ export interface DataOverrides {
   sectionRiskMeta: Record<string, Record<string, SectionRiskMetaOverride>>;
   sectionInventory: Record<string, Record<string, SectionInventoryOverride>>;
   sectionRehab: Record<string, Record<string, SectionRehabOverride>>;
+  /**
+   * Admin-imported repair log (Admin -> Repair Log, brief section 6.1),
+   * replacing the seeded public/data/repair-log-2025.json wholesale. Not
+   * year-scoped like the fields above: the log is a continuous 7-month event
+   * stream, not a per-survey-year snapshot, so one import applies regardless
+   * of which PCI survey year is being viewed. Undefined means "use the seed".
+   */
+  repairLog?: RepairLogRecord[];
 }
 
 // Merges a partial patch into an existing override object. A key explicitly
