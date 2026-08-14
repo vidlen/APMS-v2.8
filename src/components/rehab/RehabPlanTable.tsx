@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Search, ArrowUp, ArrowDown, ArrowUpDown, X } from "lucide-react";
 import type { SectionData } from "@/lib/pci-utils";
 import { REHAB_YEARS, REHAB_YEAR_COLORS, formatIdrCompact, type RehabPlanItem, type RehabYear } from "@/lib/rehab";
+import type { RiskCostResult } from "@/lib/risk-cost";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -14,6 +15,9 @@ import {
 
 interface RehabPlanTableProps {
   plan: RehabPlanItem[];
+  /** branchId -> Alberti risk/cost result (Phase 7), absent for "No M&R"
+   *  branches and any branch outside the risk engine's coverage. */
+  riskCostByBranch?: Record<string, RiskCostResult>;
   activeYears: Set<RehabYear>;
   onClearYears: () => void;
   selectedSection: SectionData | null;
@@ -21,7 +25,7 @@ interface RehabPlanTableProps {
   onClose: () => void;
 }
 
-type SortKey = "Section" | "PCI" | "Treatment" | "Year" | "Cost";
+type SortKey = "Section" | "PCI" | "Treatment" | "Year" | "Cost" | "RiskCost";
 type SortDir = "asc" | "desc";
 
 const COLUMNS: { key: SortKey; label: string; title?: string }[] = [
@@ -30,10 +34,18 @@ const COLUMNS: { key: SortKey; label: string; title?: string }[] = [
   { key: "Treatment", label: "Treatment" },
   { key: "Year", label: "Priority" },
   { key: "Cost", label: "Funds", title: "Placeholder estimate - not a real cost projection" },
+  {
+    key: "RiskCost",
+    label: "R/C",
+    title: "Alberti & Fiori (2019) Eq. 2: Fine-Kinney risk removed per million IDR spent, from this treatment's PCI reset. Higher means the treatment buys more risk reduction per rupiah.",
+  },
 ];
+
+const EMPTY_RISK_COST: Record<string, RiskCostResult> = {};
 
 export default function RehabPlanTable({
   plan,
+  riskCostByBranch = EMPTY_RISK_COST,
   activeYears,
   onClearYears,
   selectedSection,
@@ -65,13 +77,26 @@ export default function RehabPlanTable({
       if (sortKey === "PCI") return (a.pci - b.pci) * dir;
       if (sortKey === "Treatment") return a.treatment.localeCompare(b.treatment) * dir;
       if (sortKey === "Cost") return (a.costIdr - b.costIdr) * dir;
+      if (sortKey === "RiskCost") {
+        // "No M&R" and any branch outside risk-engine coverage have no
+        // ratio at all - sink below every real ratio regardless of sort
+        // direction. A FINITE sentinel, not -Infinity: two missing-ratio
+        // rows compared against each other via (-Infinity) - (-Infinity)
+        // produce NaN, an invalid sort-comparator result that corrupts the
+        // whole ordering once enough rows share it (most branches here are
+        // "No M&R", so this wasn't a rare edge case - it broke every sort).
+        const MISSING_RATIO = -1;
+        const ra = riskCostByBranch[a.section.Section]?.ratioPerMillionIdr ?? MISSING_RATIO;
+        const rb = riskCostByBranch[b.section.Section]?.ratioPerMillionIdr ?? MISSING_RATIO;
+        return (ra - rb) * dir;
+      }
       if (sortKey === "Year") {
         const yearRank = REHAB_YEARS.indexOf(a.priorityYear) - REHAB_YEARS.indexOf(b.priorityYear);
         return (yearRank || a.pci - b.pci) * dir;
       }
       return a.section.Section.localeCompare(b.section.Section) * dir;
     });
-  }, [plan, query, activeYears, sortKey, sortDir]);
+  }, [plan, riskCostByBranch, query, activeYears, sortKey, sortDir]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -200,6 +225,18 @@ export default function RehabPlanTable({
                 </TableCell>
                 <TableCell className="p-1.5 font-mono text-xs tabular-nums text-muted-foreground whitespace-nowrap">
                   {item.costIdr > 0 ? formatIdrCompact(item.costIdr) : "—"}
+                </TableCell>
+                <TableCell
+                  className="p-1.5 font-mono text-xs tabular-nums text-muted-foreground"
+                  title={
+                    riskCostByBranch[item.section.Section]
+                      ? `Risk ${riskCostByBranch[item.section.Section].riskBefore.toFixed(1)} -> ${riskCostByBranch[item.section.Section].riskAfter.toFixed(1)} (PCI ${riskCostByBranch[item.section.Section].currentPci} -> ${riskCostByBranch[item.section.Section].afterPci})`
+                      : undefined
+                  }
+                >
+                  {riskCostByBranch[item.section.Section]
+                    ? riskCostByBranch[item.section.Section].ratioPerMillionIdr.toFixed(1)
+                    : "—"}
                 </TableCell>
               </TableRow>
             );

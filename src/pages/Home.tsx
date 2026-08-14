@@ -509,7 +509,12 @@ export default function Home() {
           />
         </div>
       ) : activeTab === "rehab" && showPciData ? (
-        <RehabTab sections={sections} selectedYear={selectedYear} />
+        <RehabTab
+          sections={sections}
+          selectedYear={selectedYear}
+          unitsBySection={unitsBySection}
+          repairLogByBranch={repairLogAggregate.byBranch}
+        />
       ) : (
         <div className="relative flex-1 flex items-center justify-center min-h-0 bg-background">
           <div className="text-center space-y-3 max-w-sm px-6">

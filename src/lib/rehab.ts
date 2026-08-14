@@ -62,6 +62,38 @@ function getTreatment(pci: number): RehabTreatment {
   return "No M&R";
 }
 
+/**
+ * PCI reset value (ΔPCI) per treatment - how much a treatment raises PCI.
+ * Phase 7 (Alberti risk/cost prioritisation): needed to project a branch's
+ * condition, and therefore its risk, AFTER a treatment - something the plan
+ * never modelled before this, since computeRehabPlan only ever scores a
+ * branch's PRESENT PCI.
+ *
+ * Values are Alberti & Fiori (2019) Table 12's own reset figures, matched by
+ * LADDER POSITION rather than by treatment description: both ladders are
+ * four tiers running light to heavy, but a 5 cm airport runway overlay and
+ * Alberti's road "routine maintenance" are not the same intervention. The
+ * correspondence taken here is that this network's four tiers receive that
+ * network's four ΔPCI figures, in the same order:
+ *
+ *   Seal Coat / Crack Sealing  <-> Preventive maintenance,   10
+ *   5 cm Overlay               <-> Routine maintenance,       20
+ *   6 cm Overlay                <-> Minor rehabilitation,      45
+ *   12 cm Structural Overlay   <-> Major rehabilitation,      95
+ */
+export const REHAB_RESET_PCI: Record<Exclude<RehabTreatment, "No M&R">, number> = {
+  "Seal Coat / Crack Sealing": 10,
+  "5 cm Overlay": 20,
+  "6 cm Overlay": 45,
+  "12 cm Structural Overlay": 95,
+};
+
+/** PCI after a treatment, capped at 100. "No M&R" leaves PCI unchanged. */
+export function resetPci(currentPci: number, treatment: RehabTreatment): number {
+  if (treatment === "No M&R") return currentPci;
+  return Math.min(100, currentPci + REHAB_RESET_PCI[treatment]);
+}
+
 // Dummy planning-level unit rates (IDR/m²) - not a quantity-surveyed cost,
 // just enough to make "funds needed" scale sensibly with treatment severity
 // and section size instead of showing a flat or fabricated-looking number.
