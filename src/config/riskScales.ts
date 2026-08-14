@@ -15,6 +15,11 @@
  *      Airport. Applied Sciences 14(24), 12034. (APIRM model)
  *  [3] ICAO Annex 14, Vol. I - Aerodrome Design and Operations (SMS requirement)
  *  [4] ASTM D5340 - Standard Test Method for Airport Pavement Condition Index
+ *  [5] Pasindu, H.R. (2011). Incorporating Risk Considerations in Airport
+ *      Runway Pavement Maintenance Management. PhD thesis, National University
+ *      of Singapore. (Failure-mode framing for hazard classes; the argument
+ *      that distress SEVERITY, not mere presence, sets the effect on aircraft
+ *      operations.)
  *
  * DEVIATION FROM [2] (state this in your methodology chapter):
  *   Seven & Yardim obtain Likelihood from a survey of six Istanbul Airport
@@ -272,6 +277,19 @@ export const DISTRESS_TO_HAZARD_CLASS: Record<string, HazardClass> = {
   'JET BLAST EROSION': 'fod',
   'JOINT SEAL DAMAGE': 'fod',
   SPALLING: 'fod',
+  // Added for the repair log (section 8). POTHOLE is the second most frequent
+  // distress recorded across the North Runway (188 of 678 records) and had no
+  // entry, so every pothole scored as hazard class 'other'.
+  //
+  // POTHOLE has both a FOD pathway and a structural cause, so the choice is a
+  // real one: a cavity implies a failing layer underneath, but it also throws
+  // loose material an aircraft tyre can strike and ingest. Classified 'fod'
+  // following Seven & Yardim [2], who treat pavement-related FOD as
+  // safety-critical. On a runway this is also the more conservative reading -
+  // CONSEQUENCE_MATRIX gives runway/fod 40 against runway/structural 15.
+  POTHOLE: 'fod',
+  // Surface layer loss, so debris. 18 records.
+  'ASPHALT STRIPPING': 'fod',
   POLISHED_AGGREGATE: 'friction',
   BLEEDING: 'friction',
   RUTTING: 'friction',
@@ -284,6 +302,10 @@ export const DISTRESS_TO_HAZARD_CLASS: Record<string, HazardClass> = {
   'BLOCK CR': 'structural',
   'SLIPPAGE CR': 'structural',
   'JT REFLECTION CR': 'structural',
+  // Concrete column, Jenis Kerusakan (Beton). A corner break is a slab
+  // load-transfer failure, so structural rather than the FOD reading SPALLING
+  // gets above.
+  'CORNER CR': 'structural',
   'OIL SPILLAGE': 'other',
 };
 
@@ -371,3 +393,174 @@ export const PLANNING_HORIZON_YEARS = 5;
  * Rehabilitation Plan tab (seal coat at PCI 80).
  */
 export const TRIGGER_STATE_PCI = 80;
+
+/* =============================================================================
+ * 8. REPAIR LOG: FACILITY JOIN, DISTRESS ALIASES, DOMINANT-DISTRESS METRIC
+ *
+ * Until v2.8 only 2 of 75 branches had a recorded dominant distress, so 73
+ * scored hazard class 'other' and drew their consequence from the bottom
+ * column of CONSEQUENCE_MATRIX. This section is what replaces that: the
+ * airport's own maintenance repair log, 678 dated records over the period
+ * 2025-08-01 to 2026-02-27 (record dates 2025-08-30 to 2026-02-26), which
+ * carries a distress type for 31 branches.
+ *
+ * SOURCE
+ *   REKAP KERUSAKAN 2025.xlsx, sheet 'Worksheet', header row 4, 678 data rows,
+ *   converted by scripts/convert-repair-log.py into
+ *   public/data/repair-log-2025.json.
+ *
+ * The log's own header reads "Unit: North Runway", so the 44 branches it never
+ * mentions are not a fault in the join - see the coverage panel, which splits
+ * them into the 12 north-side branches with no repair recorded in the window
+ * and the 32 branches outside the log's unit entirely.
+ * ========================================================================== */
+
+/** Repair-log facility label -> Section code in pavement-data.json.
+ *  Source: REKAP KERUSAKAN 2025.xlsx, Nama Fasilitas column, 22 distinct
+ *  labels of which these 16 name exactly one branch. Accounts for 606 of the
+ *  678 records.
+ *  The log writes runway designators with a dash; the app uses a slash. */
+export const FACILITY_TO_BRANCH: Record<string, string> = {
+  'RUNWAY 07L/25R': '07L/25R',
+  'RUNWAY 06-24': '06/24',
+  'RUNWAY 07R/25L': '07R/25L',
+  'TAXIWAY NP1': 'NP1',
+  'TAXIWAY NP2': 'NP2',
+  'TAXIWAY NP3': 'NP3',
+  'TAXIWAY NPE': 'NPE',
+  'TAXIWAY NPW': 'NPW',
+  'TAXIWAY SP1': 'SP1',
+  'TAXIWAY SPW': 'SPW',
+  'TAXIWAY EC1': 'EC1',
+  'TAXIWAY EC2': 'EC2',
+  'APRON A': 'Apron A',
+  'APRON B': 'Apron B', // AMBIGUOUS: the network also has 'Remote Apron B'. 1 record. Confirm.
+  'APRON F': 'Apron F',
+  'APRON G': 'Apron G',
+};
+
+/** Facility labels that name a group of branches rather than one. 70 records.
+ *  Resolve the branch from Lokasi Perbaikan; fall back to unassigned. */
+export const FACILITY_GROUPS: string[] = [
+  'GATE TAXIWAY N1-N9',
+  'GATE CROSS TAXIWAY N3M-N8M',
+  'GATE CROSS TAXIWAY NC1-NC9',
+  'GATE TAXIWAY M1-M8',
+  'GATE CROSS TAXIWAY SC1-SC9',
+];
+
+/** Matches a branch code inside a free-text location.
+ *
+ *  The trailing \b is load-bearing: it is what stops N3 matching inside N3M.
+ *  Listing the M-suffixed form first is belt and braces - both orders return
+ *  N3M while the boundary is present, and dropping the boundary moves records
+ *  onto the wrong branch in silence. repair-log.test.ts asserts on the
+ *  boundary, not on the alternation order.
+ *
+ *  The pattern is deliberately wider than the network: it matches M3-M6 and
+ *  S1-S9 shapes that either do not exist as Section codes or belong to another
+ *  group. resolveBranch only accepts a match that exists in the loaded
+ *  network, so that guard - not this pattern - is what prevents a phantom
+ *  branch. Keep both. */
+export const LOCATION_BRANCH_PATTERN = /\b(N[1-9]M|N[1-9]|NC[1-9]|M[1-8]|SC[1-9]|S[1-9])\b/;
+
+/** Repair-log distress names -> canonical PAVER/ASTM keys.
+ *  Source strings are bilingual (English, Indonesian in parentheses) and are
+ *  matched after trim + toUpperCase. Add new spellings here rather than
+ *  guessing at runtime. */
+export const DISTRESS_ALIASES: Record<string, string> = {
+  // --- Jenis Kerusakan (Aspal), 15 strings ---
+  'ALLIGATOR/FATIGUE CRACK (RETAK KULIT BUAYA)': 'ALLIGATOR CR',
+  'ASPHALT STRIPPING (MENGELUPAS)': 'ASPHALT STRIPPING',
+  'BLEEDING (KEGEMUKAN)': 'BLEEDING',
+  'BLOCK CRACK (RETAK BLOK)': 'BLOCK CR',
+  'CORRUGATION (BERGELOMBANG)': 'CORRUGATION',
+  'DEPRESSION (AMBLAS)': 'DEPRESSION',
+  'JOINT REFLECTION CRACK - PCC (RETAK SAMBUNGAN - PCC)': 'JT REFLECTION CR',
+  'LONGITUDINAL AND TRANSVERSAL CRACK (RETAK MEMANJANG DAN MELINTANG)': 'L & T CR',
+  'PATCHING (TAMBALAN)': 'PATCHING',
+  'POTHOLE (LUBANG)': 'POTHOLE',
+  'RAVELING AND WEATHERING (BUTIRAN LEPAS DAN PELAPUKAN)': 'RAVELING',
+  'RUTTING (ALUR)': 'RUTTING',
+  'SHOVING OF ASPHALT PAVEMENT FROM PCC (SUNGKUR)': 'SHOVING',
+  'SLIPPAGE CRACK (RETAK SABIT)': 'SLIPPAGE CR',
+  'SWELLING (PENGEMBANGAN)': 'SWELL',
+
+  // --- Jenis Kerusakan (Beton), 5 strings ---
+  'CORNER CRACK (RETAK SUDUT)': 'CORNER CR',
+  'SPALLING (LONGITUDINAL AND TRANSVERSE JOINT)': 'SPALLING',
+  'SPALLING (CORNER)': 'SPALLING',
+  'PATCHING BESAR (LEBIH DARI 0,5 M2) DAN GALIAN UTILITAS': 'PATCHING',
+  'POTHOLES (LUBANG)': 'POTHOLE',
+
+  // --- PCI sample-unit spellings, kept from the sample-unit path ---
+  'ALLIGATOR CRACKING': 'ALLIGATOR CR',
+  'LONGITUDINAL & TRANSVERSE CRACKING': 'L & T CR',
+  'LONGITUDINAL/TRANSVERSE CRACKING': 'L & T CR',
+  'JOINT REFLECTION CRACKING': 'JT REFLECTION CR',
+};
+
+/**
+ * How the dominant distress is chosen from repair-log records.
+ *
+ * The three candidate metrics disagree, and not marginally. Measured on the
+ * committed log (see dominant-distress.test.ts, which pins every figure here):
+ *
+ *   - the dominant distress NAME differs between count and area on 9 of the
+ *     31 covered branches;
+ *   - the dominant HAZARD CLASS, which is what actually reaches C, differs
+ *     across the three metrics on 5 of the 31: 06/24, N1, N4M, N5, NP3.
+ *     None of those five depends on how a tie is broken.
+ *   - and 2 of those five - N1 and N4M - split on area versus severity_area
+ *     ALONE, so the decision still bites even if the count metric is discarded
+ *     outright.
+ *
+ * There is a second, sharper reason to prefer severity_area, found while
+ * verifying the first: `count` has a TIED top rank on 5 branches - EC1, N4M,
+ * N6, N7 and NC2 - so on those the "most frequent distress" is not defined by
+ * the data at all, only by whatever order the tie is resolved in. `area` and
+ * `severity_area` tie nowhere on this log; both single out one distress on all
+ * 31 covered branches.
+ *
+ * So this is a stated modelling decision, not a detail: one candidate metric
+ * is not even well-defined on a sixth of the covered network.
+ *
+ * severity_area is chosen because ASTM D5340 [4] deduct values are a function
+ * of distress type, severity AND density together. The log carries no deduct
+ * value, so extent times severity is the closest analogue available. Pasindu
+ * [5] makes the same argument from the safety side: the severity of a distress,
+ * not merely its presence, is what determines its effect on aircraft
+ * operations.
+ */
+export const DOMINANT_DISTRESS_METRIC: 'count' | 'area' | 'severity_area' = 'severity_area';
+
+/**
+ * Tingkat Kerusakan -> multiplier. Linear by assumption; ASTM deduct curves
+ * are not linear. State this in the methodology chapter.
+ *
+ * A record whose Tingkat Kerusakan is blank gets weight 0, so it counts toward
+ * `count` and `area` but contributes nothing to `severity_area`. Two records
+ * in the committed log are in this state (both on 07L/25R). Defaulting them to
+ * RINGAN would invent a severity that nobody recorded; weight 0 keeps them
+ * visible in the other two metrics and the aggregate reports the count so the
+ * omission is legible rather than silent.
+ */
+export const SEVERITY_WEIGHT: Record<string, number> = { RINGAN: 1, SEDANG: 2, BERAT: 3 };
+
+/**
+ * Precedence for resolving a branch's dominant distress. First hit wins.
+ *
+ *   admin      an explicit override in Admin -> Risk Inventory
+ *   units      PCI sample units, aggregated by deduct
+ *   log        the repair log, aggregated by DOMINANT_DISTRESS_METRIC
+ *   inventory  KNOWN_DOMINANT_DISTRESS, the two-row reviewed table
+ *   none       nothing - hazard class 'other', displayed as a gap
+ *
+ * Sample units rank above the log because a PCI survey is a systematic census
+ * of the pavement, whereas the log is an event record: distress that nobody
+ * found, or found and did not fix, never appears in it. A reader may argue the
+ * log is more recent and should therefore win, which is exactly why the order
+ * is a named constant instead of the order of some if/else chain.
+ */
+export const DISTRESS_SOURCE_ORDER = ['admin', 'units', 'log', 'inventory'] as const;
+export type DistressSource = (typeof DISTRESS_SOURCE_ORDER)[number] | 'none';
