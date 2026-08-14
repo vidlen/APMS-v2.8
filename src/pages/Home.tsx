@@ -505,6 +505,7 @@ export default function Home() {
             selectedYear={selectedYear}
             unitsBySection={unitsBySection}
             repairLogByBranch={repairLogAggregate.byBranch}
+            repairLogStats={repairLogAggregate.stats}
           />
         </div>
       ) : activeTab === "rehab" && showPciData ? (

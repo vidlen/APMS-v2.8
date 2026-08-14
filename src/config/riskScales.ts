@@ -564,3 +564,20 @@ export const SEVERITY_WEIGHT: Record<string, number> = { RINGAN: 1, SEDANG: 2, B
  */
 export const DISTRESS_SOURCE_ORDER = ['admin', 'units', 'log', 'inventory'] as const;
 export type DistressSource = (typeof DISTRESS_SOURCE_ORDER)[number] | 'none';
+
+/**
+ * Of the 44 branches the repair log never reaches (distressSource 'none'),
+ * these 12 are north-side codes whose SIBLING branches do appear in the log -
+ * M1/M7 are covered but M2/M8 are not, N1/N3/N5-N7/N9 are covered but
+ * N2/N4/N8/N8M are not, and so on. For these the gap reads as "no repair was
+ * recorded in this window", not a scope boundary.
+ *
+ * The remaining 32 (everything covered minus this list) are genuinely outside
+ * the log's stated scope - its own header reads "Unit: North Runway" - and
+ * the coverage panel reports that as a second, distinct reason. Kept as a
+ * runtime constant rather than only a test fixture so the panel can render
+ * the split instead of a flat "none" count.
+ */
+export const REPAIR_LOG_NO_RECORD_IN_WINDOW: string[] = [
+  'M2', 'M8', 'N2', 'N4', 'N8', 'N8M', 'NC1', 'NC4', 'NC6', 'NC7', 'NC9', 'NCY',
+];

@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { Search, ArrowUp, ArrowDown, ArrowUpDown, Info, Download, X, SlidersHorizontal } from "lucide-react";
 import type { BranchRiskResult } from "@/lib/risk";
-import { ROLE_LABELS, type BranchRole } from "@/config/riskScales";
+import { metricValue, type DistressTally } from "@/lib/dominant-distress";
+import { ROLE_LABELS, DOMINANT_DISTRESS_METRIC, type BranchRole, type DistressSource } from "@/config/riskScales";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -17,6 +18,9 @@ interface RiskRegisterTableProps {
   results: BranchRiskResult[];
   /** branchId -> role, from the same inputs that produced `results` (risk-adapter.ts). */
   roleByBranch: Record<string, BranchRole>;
+  /** branchId -> top 3 repair-log distresses by DOMINANT_DISTRESS_METRIC, for
+   *  the trace popover (brief 8.2). Absent for a branch with no log records. */
+  topLogDistressesByBranch?: Record<string, DistressTally[]>;
   /** Controlled by RiskTab so the risk map (backlog F) can filter the register on a click. */
   query: string;
   onQueryChange: (query: string) => void;
@@ -38,18 +42,48 @@ const TIER_LABELS: Record<string, string> = {
   pci: "Current PCI (Tier 3)",
 };
 
+// Section 8, riskScales.ts: where a branch's dominant distress came from.
+// 'none' reads as a visible gap in the register, not a blank cell.
+const DISTRESS_SOURCE_LABELS: Record<DistressSource, string> = {
+  admin: "Admin",
+  units: "PCI units",
+  log: "Repair log",
+  inventory: "Inventory",
+  none: "No evidence",
+};
+
+const DISTRESS_SOURCE_TITLES: Record<DistressSource, string> = {
+  admin: "Set explicitly in Admin -> Risk Inventory",
+  units: "PCI sample units, aggregated by total ASTM D5340 deduct",
+  log: "The repair log, aggregated by severity x area",
+  inventory: "The reviewed two-row table (06/24, 07L/25R only)",
+  none: "No evidence from any source - hazard class falls back to 'other'",
+};
+
+const METRIC_UNIT_LABELS: Record<string, string> = {
+  count: "records",
+  area: "m2",
+  severity_area: "severity x area",
+  deduct: "deduct",
+};
+
 // Worst-first ordering for the ICAO zone / detectability columns - lets
 // "sort by zone" mean something (group the branches needing attention
 // first), matching how R already sorts worst-first by default.
 const ZONE_RANK: Record<string, number> = { Intolerable: 0, Tolerable: 1, Acceptable: 2 };
 const DETECTABILITY_RANK: Record<string, number> = { hidden: 0, moderate: 1, visible: 2 };
 
-type SortKey = "branch" | "role" | "L" | "F" | "C" | "R" | "degree" | "zone" | "detect";
+type SortKey = "branch" | "role" | "distress" | "L" | "F" | "C" | "R" | "degree" | "zone" | "detect";
 type SortDir = "asc" | "desc";
 
 const COLUMNS: { key: SortKey; label: string; title?: string }[] = [
   { key: "branch", label: "Branch" },
   { key: "role", label: "Role" },
+  {
+    key: "distress",
+    label: "Distress",
+    title: "Dominant distress and its source, first hit wins: admin override, PCI sample units, repair log, reviewed inventory",
+  },
   { key: "L", label: "L" },
   { key: "F", label: "F" },
   { key: "C", label: "C" },
@@ -70,7 +104,8 @@ function csvCell(value: string): string {
 
 function downloadCsv(filename: string, rows: BranchRiskResult[], roleLabel: (r: BranchRiskResult) => string) {
   const header = [
-    "Branch", "Role", "Hazard Class", "Likelihood", "Frequency", "Consequence",
+    "Branch", "Role", "Dominant Distress", "Distress Source", "Hazard Class",
+    "Likelihood", "Frequency", "Consequence",
     "R", "FK Degree", "ICAO Cell", "ICAO Zone", "Likelihood Tier", "Detectability",
     "Detectability Applied", "Expert Override Applied", "Recommended Action", "Trace",
   ];
@@ -78,6 +113,8 @@ function downloadCsv(filename: string, rows: BranchRiskResult[], roleLabel: (r: 
     [
       r.branchName,
       roleLabel(r),
+      r.dominantDistress ?? "",
+      DISTRESS_SOURCE_LABELS[r.distressSource ?? "none"],
       HAZARD_LABELS[r.hazardClass] ?? r.hazardClass,
       r.likelihood,
       r.frequency,
@@ -111,6 +148,7 @@ function downloadCsv(filename: string, rows: BranchRiskResult[], roleLabel: (r: 
 export default function RiskRegisterTable({
   results,
   roleByBranch,
+  topLogDistressesByBranch = {},
   query,
   onQueryChange,
   cellFilter,
@@ -140,6 +178,10 @@ export default function RiskRegisterTable({
           return a.branchName.localeCompare(b.branchName) * dir;
         case "role":
           return roleLabel(a).localeCompare(roleLabel(b)) * dir;
+        case "distress":
+          // Branches with no evidence sort together at whichever end 'zzz'
+          // lands on, rather than interleaving with real distress names.
+          return (a.dominantDistress ?? "zzz").localeCompare(b.dominantDistress ?? "zzz") * dir;
         case "L":
           return (a.likelihood - b.likelihood) * dir;
         case "F":
@@ -254,6 +296,26 @@ export default function RiskRegisterTable({
                 <TableCell className="px-2 py-1.5 text-xs text-muted-foreground whitespace-nowrap">
                   {roleLabel(r)}
                 </TableCell>
+                <TableCell className="px-2 py-1.5 text-xs whitespace-nowrap">
+                  {r.dominantDistress ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="text-foreground">{r.dominantDistress}</span>
+                      <span
+                        className="text-[9px] px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground uppercase tracking-wide shrink-0"
+                        title={DISTRESS_SOURCE_TITLES[r.distressSource ?? "none"]}
+                      >
+                        {DISTRESS_SOURCE_LABELS[r.distressSource ?? "none"]}
+                      </span>
+                    </span>
+                  ) : (
+                    <span
+                      className="text-muted-foreground italic"
+                      title={DISTRESS_SOURCE_TITLES.none}
+                    >
+                      No evidence
+                    </span>
+                  )}
+                </TableCell>
                 <TableCell className="px-2 py-1.5 font-mono text-xs tabular-nums text-foreground">
                   {r.likelihood}
                 </TableCell>
@@ -337,6 +399,26 @@ export default function RiskRegisterTable({
                           </li>
                         ))}
                       </ul>
+                      {(topLogDistressesByBranch[r.branchId]?.length ?? 0) > 0 && (
+                        <div className="mt-2.5 pt-2.5 border-t border-border">
+                          <p className="font-condensed font-semibold uppercase tracking-wide text-[10px] text-muted-foreground mb-1.5">
+                            Top distresses, repair log ({METRIC_UNIT_LABELS[DOMINANT_DISTRESS_METRIC]})
+                          </p>
+                          <ul className="space-y-1">
+                            {topLogDistressesByBranch[r.branchId].map((t) => (
+                              <li
+                                key={t.distress}
+                                className="flex items-center justify-between gap-2 text-foreground/90"
+                              >
+                                <span>{t.distress}</span>
+                                <span className="font-mono tabular-nums text-muted-foreground">
+                                  {metricValue(t, DOMINANT_DISTRESS_METRIC).toFixed(1)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </PopoverContent>
                   </Popover>
                 </TableCell>

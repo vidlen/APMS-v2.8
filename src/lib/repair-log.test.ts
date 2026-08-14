@@ -24,7 +24,11 @@ import {
   type RepairLogRecord,
 } from './repair-log.ts';
 import { canonicalDistress } from './dominant-distress.ts';
-import { DISTRESS_TO_HAZARD_CLASS, LOCATION_BRANCH_PATTERN } from '../config/riskScales.ts';
+import {
+  DISTRESS_TO_HAZARD_CLASS,
+  LOCATION_BRANCH_PATTERN,
+  REPAIR_LOG_NO_RECORD_IN_WINDOW,
+} from '../config/riskScales.ts';
 
 // The Section codes of the committed network (pavement-data.json), as far as
 // the join cares. Includes N3/N3M/N6/N7M/M1 so the precedence tests are real,
@@ -442,10 +446,11 @@ test('the 44 branches the log never reaches are exactly the expected ones', () =
 
   // 12 north-side branches whose siblings DO appear in the log - no repair was
   // recorded in the window - and 32 outside the log's "Unit: North Runway"
-  // scope. The coverage panel has to tell those two gaps apart.
-  const noRecordInWindow = [
-    'M2', 'M8', 'N2', 'N4', 'N8', 'N8M', 'NC1', 'NC4', 'NC6', 'NC7', 'NC9', 'NCY',
-  ];
+  // scope. The coverage panel has to tell those two gaps apart. The 12 is a
+  // real runtime constant (riskScales.ts), not just a test fixture, so the
+  // panel can render the split - assert against it rather than a second
+  // hand-typed copy.
+  const noRecordInWindow = [...REPAIR_LOG_NO_RECORD_IN_WINDOW].sort();
   const outsideLogScope = [
     'Apron C', 'Apron D', 'Apron E', 'Apron H', 'Apron I', 'Apron J', 'Apron K',
     'Remote Apron B', 'Remote Apron C', 'Remote Apron D',

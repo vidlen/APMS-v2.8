@@ -5,17 +5,19 @@ import type { SurveyYear } from "@/lib/survey-years";
 import { useData } from "@/lib/data-store";
 import type { SectionRiskMetaOverride } from "@/lib/data-overrides";
 import type { GeoJSONFeatureCollection } from "@/lib/geojson-types";
-import type { DistressTally } from "@/lib/dominant-distress";
+import { rankDistresses, type DistressTally } from "@/lib/dominant-distress";
 import type { MarkovForecastEntry } from "@/lib/markov-forecast";
+import type { RepairLogStats } from "@/lib/repair-log";
 import { toBranchRiskInputs } from "@/lib/risk-adapter";
 import { scoreNetwork, riskProfile, type BranchRiskResult } from "@/lib/risk";
 import { ICAO_ZONES, ICAO_GRID_PROVENANCE, type IcaoZoneName } from "@/config/icaoMatrix";
-import { RISK_BANDS, type BranchRole } from "@/config/riskScales";
+import { RISK_BANDS, DOMINANT_DISTRESS_METRIC, type BranchRole } from "@/config/riskScales";
 import MapView, { type MapColorMode } from "@/components/MapView";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import RiskRegisterTable from "./RiskRegisterTable";
 import IcaoMatrixPanel from "./IcaoMatrixPanel";
 import ComparisonViews from "./ComparisonViews";
+import DistressCoveragePanel from "./DistressCoveragePanel";
 
 interface RiskTabProps {
   sections: SectionData[];
@@ -28,6 +30,8 @@ interface RiskTabProps {
   /** The repair log, already aggregated against this year's branch set
    *  (Home.tsx: aggregateRepairLog(...).byBranch) - the 'log' tier. */
   repairLogByBranch?: Record<string, DistressTally[]>;
+  /** Same aggregation's resolution counts, for the coverage panel. */
+  repairLogStats?: RepairLogStats;
 }
 
 const ZONE_ORDER: IcaoZoneName[] = ["Intolerable", "Tolerable", "Acceptable"];
@@ -41,6 +45,17 @@ const EMPTY_META: Record<string, SectionRiskMetaOverride> = {};
 const EMPTY_MARKOV: Record<string, MarkovForecastEntry> = {};
 const EMPTY_UNITS: Record<string, GeoJSONFeatureCollection> = {};
 const EMPTY_LOG: Record<string, DistressTally[]> = {};
+const EMPTY_STATS: RepairLogStats = {
+  total: 0,
+  byFacility: 0,
+  byLocation: 0,
+  unresolvedGroup: 0,
+  unknownFacility: 0,
+  skippedNoDistress: 0,
+  aggregatedWithoutSeverity: 0,
+  aggregated: 0,
+  branchesCovered: 0,
+};
 
 // MapView is shared with the PCI tab (backlog F: "reuse the existing GeoJSON
 // component"), whose props include a PCI-band legend filter and a
@@ -95,6 +110,7 @@ export default function RiskTab({
   selectedYear,
   unitsBySection = EMPTY_UNITS,
   repairLogByBranch = EMPTY_LOG,
+  repairLogStats = EMPTY_STATS,
 }: RiskTabProps) {
   const { overrides } = useData();
   const riskMetaOverrides = overrides.sectionRiskMeta[selectedYear] ?? EMPTY_META;
@@ -141,6 +157,28 @@ export default function RiskTab({
   }, [results]);
 
   const degreeCounts = useMemo(() => riskProfile(results), [results]);
+
+  // Top three log distresses per branch (brief 8.2: "a reader sees that
+  // 07L/25R ran POTHOLE at 157 records against PATCHING at 66.2 m2"), ranked
+  // by the same metric the engine scores on so the popover matches the
+  // reasoning that decided the branch's hazard class. Reused for the trace
+  // popover rather than a separate detail panel - it's the same information.
+  const topLogDistressesByBranch = useMemo(() => {
+    const map: Record<string, DistressTally[]> = {};
+    for (const [branch, tallies] of Object.entries(repairLogByBranch)) {
+      map[branch] = rankDistresses(tallies, DOMINANT_DISTRESS_METRIC).slice(0, 3);
+    }
+    return map;
+  }, [repairLogByBranch]);
+
+  // Read from the register's own results, not recomputed independently, so
+  // the coverage panel and the register can never quietly disagree about
+  // what counts as "covered" (brief section 7: a register that hides the gap
+  // reads as full coverage).
+  const coveredBranches = useMemo(
+    () => results.filter((r) => r.dominantDistress !== undefined).length,
+    [results],
+  );
 
   // Three filter mechanisms (free-text search, a map click, a matrix cell)
   // stay mutually exclusive rather than silently AND-ing together: picking
@@ -267,9 +305,17 @@ export default function RiskTab({
         </div>
       </div>
 
+      <DistressCoveragePanel
+        stats={repairLogStats}
+        coveredBranches={coveredBranches}
+        totalBranches={results.length}
+        sampleUnitBranchCount={Object.keys(unitsBySection).length}
+      />
+
       <RiskRegisterTable
         results={results}
         roleByBranch={roleByBranch}
+        topLogDistressesByBranch={topLogDistressesByBranch}
         query={query}
         onQueryChange={setQuery}
         cellFilter={selectedCell}
