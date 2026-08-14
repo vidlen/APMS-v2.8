@@ -35,6 +35,7 @@
 
 import {
   CONSEQUENCE_MATRIX,
+  CONSEQUENCE_VALUES,
   DETECTABILITY_ESCALATION,
   DISTRESS_ALIASES,
   DISTRESS_TO_HAZARD_CLASS,
@@ -45,7 +46,9 @@ import {
   PCI_TO_LIKELIHOOD,
   RISK_BANDS,
   ROLE_TO_FREQUENCY,
+  SEVERITY_CONSEQUENCE_ESCALATION,
   type Detectability,
+  type DistressSeverityLevel,
   type DistressSource,
   type HazardClass,
   type RiskBand,
@@ -99,6 +102,17 @@ export interface BranchRiskInput {
    */
   detectability?: Detectability;
 
+  /**
+   * Explicit distress-severity override (Phase 8, gated - see section 8.1,
+   * riskScales.ts). When set to 'BERAT', this ALSO escalates C by
+   * SEVERITY_CONSEQUENCE_ESCALATION.BERAT (currently +1 CONSEQUENCE_SCALE
+   * step); RINGAN/SEDANG apply the label but escalate nothing. Unlike
+   * detectability, there is no inferred default when unset - see the section
+   * note in riskScales.ts for why a branch's prevailing severity can't be
+   * mechanically derived the way hazard class can.
+   */
+  distressSeverity?: DistressSeverityLevel;
+
   /** TIER 1. P(branch reaches trigger state within the planning horizon). */
   markovTriggerProbability?: number;
 
@@ -147,6 +161,12 @@ export interface BranchRiskResult {
   detectability: Detectability;
   /** True only when `detectability` came from an explicit override on the input. */
   detectabilityApplied: boolean;
+  /** Set only when the input carried an explicit distressSeverity (Phase 8).
+   *  Undefined, not a label, since - unlike detectability - there is no
+   *  inferred default to fall back to when unset. */
+  distressSeverity?: DistressSeverityLevel;
+  /** Steps added to consequence from an explicit distressSeverity override. Zero unless one was set. */
+  consequenceEscalationSteps: number;
   likelihoodTier: LikelihoodTier;
   /** Steps added to likelihood because the survey is stale. Zero when current. */
   recencyEscalationSteps: number;
@@ -168,6 +188,16 @@ export function escalateLikelihood(likelihood: number, steps: number): number {
   if (index === -1) return likelihood;
   const target = Math.min(index + steps, LIKELIHOOD_VALUES.length - 1);
   return LIKELIHOOD_VALUES[target];
+}
+
+/** Moves a consequence value up the Fine-Kinney scale by `steps` positions.
+ *  Same shape as escalateLikelihood, for the same reason (Phase 8). */
+export function escalateConsequence(consequence: number, steps: number): number {
+  if (steps <= 0) return consequence;
+  const index = CONSEQUENCE_VALUES.indexOf(consequence);
+  if (index === -1) return consequence;
+  const target = Math.min(index + steps, CONSEQUENCE_VALUES.length - 1);
+  return CONSEQUENCE_VALUES[target];
 }
 
 export function likelihoodFromMarkov(probability: number): number {
@@ -307,6 +337,23 @@ export function scoreBranch(
       (distressLabel ? ` (${distressLabel}${sourceLabel ? `, ${sourceLabel}` : ''})` : ''),
   );
 
+  // Distress severity (Phase 8, gated): opt-in only, no inferred default -
+  // see the section note above SEVERITY_CONSEQUENCE_ESCALATION in
+  // riskScales.ts for why. Runs before the expert-override block below, so
+  // an explicit overrides.consequence still wins outright over this.
+  const consequenceEscalationSteps = input.distressSeverity
+    ? SEVERITY_CONSEQUENCE_ESCALATION[input.distressSeverity]
+    : 0;
+  if (consequenceEscalationSteps > 0) {
+    consequence = escalateConsequence(consequence, consequenceEscalationSteps);
+    trace.push(
+      `C raised to ${consequence}: distress severity set to '${input.distressSeverity}' ` +
+        `(+${consequenceEscalationSteps} step${consequenceEscalationSteps > 1 ? 's' : ''}, explicit override)`,
+    );
+  } else if (input.distressSeverity) {
+    trace.push(`Distress severity set to '${input.distressSeverity}': no escalation at this level`);
+  }
+
   // ---- Expert overrides ---------------------------------------------------
   let overridden = false;
   if (typeof overrides.likelihood === 'number') {
@@ -361,6 +408,8 @@ export function scoreBranch(
     distressSource: input.distressSource,
     detectability,
     detectabilityApplied,
+    distressSeverity: input.distressSeverity,
+    consequenceEscalationSteps,
     likelihoodTier: tier,
     recencyEscalationSteps: steps,
     detectabilityEscalationSteps: detectabilitySteps,

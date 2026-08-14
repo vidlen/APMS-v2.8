@@ -83,6 +83,14 @@ export const CONSEQUENCE_SCALE = [
  */
 export const LIKELIHOOD_VALUES: number[] = LIKELIHOOD_SCALE.map((s) => s.value);
 
+/**
+ * The six consequence levels as a plain number array, used by
+ * `escalateConsequence` (risk.ts, Phase 8) to step a value up the scale the
+ * same way `escalateLikelihood` already steps L. Same `: number[]`
+ * annotation, same reason - see the note on LIKELIHOOD_VALUES above.
+ */
+export const CONSEQUENCE_VALUES: number[] = CONSEQUENCE_SCALE.map((s) => s.value);
+
 /* =============================================================================
  * 2. RISK BANDS  (source [2] Table 6)
  *
@@ -577,6 +585,8 @@ export const DISTRESS_ALIASES: Record<string, string> = {
  */
 export const DOMINANT_DISTRESS_METRIC: 'count' | 'area' | 'severity_area' = 'severity_area';
 
+export type DistressSeverityLevel = 'RINGAN' | 'SEDANG' | 'BERAT';
+
 /**
  * Tingkat Kerusakan -> multiplier. Linear by assumption; ASTM deduct curves
  * are not linear. State this in the methodology chapter.
@@ -587,8 +597,65 @@ export const DOMINANT_DISTRESS_METRIC: 'count' | 'area' | 'severity_area' = 'sev
  * RINGAN would invent a severity that nobody recorded; weight 0 keeps them
  * visible in the other two metrics and the aggregate reports the count so the
  * omission is legible rather than silent.
+ *
+ * Kept as `Record<string, number>`, not `Record<DistressSeverityLevel, number>`:
+ * dominant-distress.ts's severityWeight() probes this with whatever raw
+ * Tingkat Kerusakan string the log actually contains, which is untrusted
+ * input that could be blank or a typo - hence the `?? 0` fallback there. The
+ * literal-union safety that matters is on SEVERITY_CONSEQUENCE_ESCALATION
+ * below, which only ever sees a value an admin selected from a closed set.
  */
 export const SEVERITY_WEIGHT: Record<string, number> = { RINGAN: 1, SEDANG: 2, BERAT: 3 };
+
+/* =============================================================================
+ * 8.1 SEVERITY-WEIGHTED CONSEQUENCE  (Phase 8, gated - Pasindu [5])
+ *
+ * Section 8 above uses Tingkat Kerusakan to pick WHICH distress dominates a
+ * branch. This is a separate, later question: once a distress is chosen,
+ * should how BADLY it presents also move the CONSEQUENCE it produces?
+ * Pasindu [5] argues yes from the safety side - severity, not mere presence,
+ * is what determines a distress's effect on aircraft operations (the same
+ * argument already cited for DOMINANT_DISTRESS_METRIC above).
+ *
+ * This is opt-in per branch, exactly as DETECTABILITY_ESCALATION already is
+ * (locked decision 6, risk.ts): a label is not even computed automatically
+ * here, because unlike hazardClass - mechanically derivable from a single
+ * distress name - a branch's PREVAILING severity requires aggregating the
+ * raw Tingkat Kerusakan distribution behind its dominant distress, which
+ * DistressTally does not carry forward (it folds straight into
+ * severityArea). Building that aggregation to auto-populate every branch
+ * would be a second feature, not this one - see the ceiling note below.
+ * Set explicitly in Admin -> Risk Inventory (BranchRiskInput.distressSeverity)
+ * when a reader has reason to flag one branch's presentation as unusually
+ * severe; every branch without one scores exactly as it did before this
+ * section existed, which is why WORKED_EXAMPLES in risk.ts is unaffected.
+ *
+ * Only BERAT escalates. RINGAN and SEDANG stay at the rule's baseline,
+ * because CONSEQUENCE_MATRIX's hazard-class values already encode the
+ * worst-credible reading for that failure mode at ordinary severity
+ * (source [1]/[2]); escalating at every severity level would double-count
+ * that headroom. BERAT is the case Pasindu's argument is strongest for - a
+ * severely presented failure genuinely changes what could go wrong, not
+ * just how likely it is.
+ *
+ * ponytail: escalates by a flat +1 CONSEQUENCE_SCALE step for BERAT, not a
+ * role- or hazard-class-sensitive table. Add a finer calibration (e.g. a
+ * runway BERAT escalating further than a non-movement-area BERAT) if the
+ * defence needs it argued at that resolution - nothing here blocks it,
+ * escalateConsequence (risk.ts) already takes an arbitrary step count.
+ * ========================================================================== */
+
+export const SEVERITY_CONSEQUENCE_ESCALATION: Record<DistressSeverityLevel, number> = {
+  RINGAN: 0,
+  SEDANG: 0,
+  BERAT: 1,
+};
+
+export const DISTRESS_SEVERITY_LABELS: Record<DistressSeverityLevel, string> = {
+  RINGAN: 'Light (Ringan)',
+  SEDANG: 'Moderate (Sedang)',
+  BERAT: 'Severe (Berat)',
+};
 
 /**
  * Precedence for resolving a branch's dominant distress. First hit wins.

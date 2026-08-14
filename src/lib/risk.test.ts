@@ -221,6 +221,73 @@ test('an explicit visible detectability override applies (is traced) but adds ze
 });
 
 /* =============================================================================
+ * Phase 8 (gated): explicit distress-severity override escalates C. Mirrors
+ * the detectability tests above exactly - same opt-in shape, same worked
+ * example (AP-REMOTE-04: L 6, F 2, C 3, R 36 with no override).
+ * ========================================================================== */
+
+test('WORKED_EXAMPLES set no distressSeverity - the pinned figures stay unaffected by Phase 8', () => {
+  for (const example of WORKED_EXAMPLES) {
+    assert.equal(example.distressSeverity, undefined);
+    const result = scoreBranch(example, FIXTURE_YEAR);
+    assert.equal(result.distressSeverity, undefined);
+    assert.equal(result.consequenceEscalationSteps, 0);
+  }
+});
+
+test('an explicit BERAT severity override escalates C by one step', () => {
+  const withoutOverride = scoreBranch(WORKED_EXAMPLES[1], FIXTURE_YEAR);
+  const withOverride = scoreBranch(
+    { ...WORKED_EXAMPLES[1], distressSeverity: 'BERAT' },
+    FIXTURE_YEAR,
+  );
+
+  assert.equal(withOverride.distressSeverity, 'BERAT');
+  assert.equal(withOverride.consequenceEscalationSteps, 1);
+  assert.equal(withOverride.consequence, 7, 'C 3 escalated one CONSEQUENCE_SCALE step to 7');
+  assert.equal(withOverride.riskScore, 84, '6 x 2 x 7, up from the un-escalated 36');
+  assert.ok(
+    withOverride.riskScore > withoutOverride.riskScore,
+    'the override is a deliberate escalation, applied only when explicitly set',
+  );
+});
+
+test('RINGAN and SEDANG severity overrides are traced but escalate nothing', () => {
+  for (const level of ['RINGAN', 'SEDANG'] as const) {
+    const result = scoreBranch({ ...WORKED_EXAMPLES[1], distressSeverity: level }, FIXTURE_YEAR);
+    assert.equal(result.distressSeverity, level);
+    assert.equal(result.consequenceEscalationSteps, 0, `'${level}' carries no escalation`);
+    assert.equal(result.consequence, 3, 'C unchanged from the un-escalated baseline');
+    assert.equal(result.riskScore, 36);
+    assert.ok(
+      result.trace.some((line) => line.includes(`severity set to '${level}'`)),
+      'the override is traced even though it has no score effect',
+    );
+  }
+});
+
+test('an explicit overrides.consequence still wins outright over a BERAT severity escalation', () => {
+  const result = scoreBranch(
+    {
+      ...WORKED_EXAMPLES[1],
+      distressSeverity: 'BERAT',
+      overrides: { consequence: 99 },
+    },
+    FIXTURE_YEAR,
+  );
+  assert.equal(result.consequence, 99, 'the expert override replaces the severity-escalated value');
+  assert.equal(result.overridden, true);
+});
+
+test('escalateConsequence clamps at the CONSEQUENCE_SCALE ceiling like escalateLikelihood does', () => {
+  const result = scoreBranch(
+    { ...WORKED_EXAMPLES[0], role: 'runway', distressSeverity: 'BERAT' }, // C already 40 (fod, runway)
+    FIXTURE_YEAR,
+  );
+  assert.equal(result.consequence, 100, 'C 40 escalated one step to the scale ceiling, not past it');
+});
+
+/* =============================================================================
  * findDegreeZoneDisagreements (backlog J, comparison 2). Reuses the same
  * runway-at-various-PCI inputs as the §6 crosswalk table above, since those
  * already pin exactly which (degree, zone) pairs occur.

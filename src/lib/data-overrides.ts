@@ -1,5 +1,5 @@
 import type { GeoJSONFeatureCollection } from "@/lib/geojson-types";
-import type { BranchRole, Detectability } from "@/config/riskScales";
+import type { BranchRole, Detectability, DistressSeverityLevel } from "@/config/riskScales";
 import type { SectionData } from "@/lib/pci-utils";
 import type { RehabTreatment, RehabYear } from "@/lib/rehab";
 import type { RepairLogRecord } from "@/lib/repair-log";
@@ -36,6 +36,9 @@ export interface SectionRiskMetaOverride {
   dominantDistress?: string;
   /** Explicit detectability (locked decision 6) - setting this also escalates L, see risk.ts. */
   detectability?: Detectability;
+  /** Explicit distress severity (Phase 8, gated) - setting this to BERAT also
+   *  escalates C, see riskScales.ts section 8.1 and risk.ts. */
+  distressSeverity?: DistressSeverityLevel;
   /** Expert L/F/C override (backlog L). Saved as one atomic object, not merged field-by-field. */
   lfcOverride?: LfcOverride;
 }

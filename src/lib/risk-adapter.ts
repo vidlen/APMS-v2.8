@@ -279,6 +279,9 @@ export function toBranchRiskInputs(
       dominantDistress: distress,
       distressSource: source,
       detectability: override?.detectability,
+      // Phase 8, gated: opt-in only, no inferred default - see the section
+      // note on SEVERITY_CONSEQUENCE_ESCALATION in riskScales.ts.
+      distressSeverity: override?.distressSeverity,
       // LfcOverride mirrors BranchRiskInput['overrides'] field for field
       // (backlog L) - passed straight through, applied last in scoreBranch.
       overrides: override?.lfcOverride,

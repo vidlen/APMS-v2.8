@@ -20,9 +20,12 @@ import {
   HAZARD_CLASS_DETECTABILITY,
   DETECTABILITY_LABELS,
   DETECTABILITY_ESCALATION,
+  DISTRESS_SEVERITY_LABELS,
+  SEVERITY_CONSEQUENCE_ESCALATION,
   DOMINANT_DISTRESS_METRIC,
   type BranchRole,
   type Detectability,
+  type DistressSeverityLevel,
   type DistressSource,
   type HazardClass,
 } from "@/config/riskScales";
@@ -52,10 +55,15 @@ interface RiskInventoryTableProps {
 const ROLE_OPTIONS = Object.entries(ROLE_LABELS) as [BranchRole, string][];
 const DISTRESS_OPTIONS = Object.keys(DISTRESS_TO_HAZARD_CLASS);
 const DETECTABILITY_OPTIONS = Object.keys(DETECTABILITY_LABELS) as Detectability[];
+const SEVERITY_OPTIONS = Object.keys(DISTRESS_SEVERITY_LABELS) as DistressSeverityLevel[];
 // Radix Select items can't take an empty-string value, so "no override" gets
 // its own sentinel and is translated back to `undefined` in the handler.
 const NONE_DISTRESS = "__none__";
 const INFERRED_DETECTABILITY = "__inferred__";
+// No "inferred" sentinel here, unlike detectability - Phase 8 has no
+// auto-inferred severity to fall back to display (see the section note on
+// SEVERITY_CONSEQUENCE_ESCALATION, riskScales.ts).
+const NONE_SEVERITY = "__none__";
 
 // Section 8, riskScales.ts - same short names the register uses, so an admin
 // reading both screens sees the same vocabulary for where a distress came from.
@@ -153,6 +161,9 @@ export default function RiskInventoryTable({ year }: RiskInventoryTableProps) {
           <TableHead>Dominant distress</TableHead>
           <TableHead title="Locked decision 6 — a label always shows; it only escalates likelihood when explicitly set here">
             Detectability
+          </TableHead>
+          <TableHead title="Phase 8 (gated) — no inferred default; BERAT escalates consequence one step when explicitly set here">
+            Distress severity
           </TableHead>
           <TableHead title="Backlog L — replaces the computed L, F, or C outright">L / F / C</TableHead>
           <TableHead className="w-10" />
@@ -310,6 +321,32 @@ export default function RiskInventoryTable({ year }: RiskInventoryTableProps) {
                 </Select>
               </TableCell>
               <TableCell>
+                <Select
+                  value={override.distressSeverity ?? NONE_SEVERITY}
+                  onValueChange={(value) =>
+                    setSectionRiskMeta(year, s.Section, {
+                      distressSeverity:
+                        value === NONE_SEVERITY ? undefined : (value as DistressSeverityLevel),
+                    })
+                  }
+                >
+                  <SelectTrigger size="sm" className="h-8 w-full min-w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE_SEVERITY}>— none set —</SelectItem>
+                    {SEVERITY_OPTIONS.map((level) => (
+                      <SelectItem key={level} value={level}>
+                        {DISTRESS_SEVERITY_LABELS[level]}
+                        {SEVERITY_CONSEQUENCE_ESCALATION[level] > 0
+                          ? ` (+${SEVERITY_CONSEQUENCE_ESCALATION[level]} step)`
+                          : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </TableCell>
+              <TableCell>
                 <LfcOverrideDialog
                   branchName={s.Section}
                   computed={{
@@ -334,6 +371,7 @@ export default function RiskInventoryTable({ year }: RiskInventoryTableProps) {
                         lastInspectionYear: undefined,
                         dominantDistress: undefined,
                         detectability: undefined,
+                        distressSeverity: undefined,
                       })
                     }
                   >
