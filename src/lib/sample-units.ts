@@ -5,6 +5,10 @@ import type { SurveyYear } from "@/lib/survey-years";
 // the live per-year list (including uploaded years) is resolved by the
 // data store.
 export const SEED_SAMPLE_UNIT_SOURCES: Record<SurveyYear, Record<string, string>> = {
+  "2026": {
+    "06/24": "/data/runway-06-24-units-2026.json",
+    "07L/25R": "/data/runway-07L-25R-units-2026.json",
+  },
   "2025": {
     "06/24": "/data/runway-06-24-units.json",
     "07L/25R": "/data/runway-07L-25R-units.json",
